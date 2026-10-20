@@ -1,0 +1,236 @@
+---
+- name: Pull and host Africa Jobs on Olamidepanel
+  hosts: all
+  become: true
+  vars:
+    jobs_domain: jobs.africandroid.world
+    jobs_repository: https://github.com/olamidebello/Africajobs.git
+    jobs_revision: main
+    jobs_source: /opt/africajobs-source
+    jobs_port: 8098
+    jobs_admin_email: dobcalldemo@gmail.com
+    # Optional existing panel import directory; no unknown panel files are modified.
+    jobs_panel_inventory_directory: ''
+  pre_tasks:
+    - name: Validate deployment configuration
+      ansible.builtin.assert:
+        that:
+          - jobs_domain is match('^[a-z0-9][a-z0-9.-]+[a-z0-9]$')
+          - jobs_port | int > 1024
+          - jobs_port | int < 65536
+          - jobs_admin_email is match('^[A-Za-z0-9_.+@-]+$')
+    - name: Install deployment dependencies
+      ansible.builtin.apt:
+        name: [git, python3, nginx, certbot, ca-certificates]
+        state: present
+        update_cache: true
+    - name: Ensure nginx is running
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+        enabled: true
+  tasks:
+    - name: Pull application without discarding local modifications
+      ansible.builtin.git:
+        repo: '{{ jobs_repository }}'
+        dest: '{{ jobs_source }}'
+        version: '{{ jobs_revision }}'
+        update: true
+        force: false
+      register: source
+    - name: Verify Python source
+      ansible.builtin.command:
+        argv: [python3, -m, py_compile, '{{ jobs_source }}/app.py']
+      changed_when: false
+    - name: Create service identity
+      ansible.builtin.user:
+        name: africajobs
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+    - name: Prepare data and status directories
+      ansible.builtin.file:
+        path: '{{ item.path }}'
+        state: directory
+        owner: '{{ item.owner }}'
+        group: '{{ item.owner }}'
+        mode: '{{ item.mode }}'
+      loop:
+        - {path: /var/lib/africajobs, owner: africajobs, mode: '0700'}
+        - {path: /var/lib/africajobs-deploy, owner: root, mode: '0700'}
+        - {path: /var/www/africajobs-acme/.well-known/acme-challenge, owner: root, mode: '0755'}
+    - name: Inspect persistent service environment
+      ansible.builtin.stat:
+        path: /etc/africajobs.env
+      register: environment
+    - name: Create initial secure administrator password
+      ansible.builtin.command:
+        argv: [python3, -c, 'import secrets; print(secrets.token_urlsafe(32))']
+      register: generated_password
+      changed_when: false
+      no_log: true
+      when: not environment.stat.exists
+    - name: Save initial credentials for the server administrator
+      ansible.builtin.copy:
+        dest: /var/lib/africajobs-deploy/initial-admin.txt
+        mode: '0600'
+        force: false
+        content: |
+          URL=https://{{ jobs_domain }}
+          Email={{ jobs_admin_email }}
+          Password={{ generated_password.stdout }}
+      no_log: true
+      when: not environment.stat.exists
+    - name: Initialize environment without replacing existing secrets
+      ansible.builtin.copy:
+        dest: /etc/africajobs.env
+        mode: '0600'
+        force: false
+        content: |
+          AFRICAJOBS_DB=/var/lib/africajobs/jobs.db
+          HOST=127.0.0.1
+          PORT={{ jobs_port }}
+          AFRICAJOBS_SECURE_COOKIES=1
+          AFRICAJOBS_ADMIN_EMAIL={{ jobs_admin_email }}
+          AFRICAJOBS_ADMIN_PASSWORD={{ generated_password.stdout }}
+      no_log: true
+      when: not environment.stat.exists
+    - name: Keep runtime port aligned with proxy
+      ansible.builtin.lineinfile:
+        path: /etc/africajobs.env
+        regexp: '^PORT='
+        line: 'PORT={{ jobs_port }}'
+      no_log: true
+    - name: Install systemd service using the pulled source
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/africajobs.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Africa Jobs on Olamidepanel
+          After=network.target
+          [Service]
+          User=africajobs
+          Group=africajobs
+          WorkingDirectory={{ jobs_source }}
+          EnvironmentFile=/etc/africajobs.env
+          Environment=PYTHONDONTWRITEBYTECODE=1
+          ExecStart=/usr/bin/python3 {{ jobs_source }}/app.py
+          Restart=on-failure
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ProtectHome=true
+          ReadWritePaths=/var/lib/africajobs
+          [Install]
+          WantedBy=multi-user.target
+    - name: Start current application edition
+      ansible.builtin.systemd:
+        name: africajobs
+        state: restarted
+        enabled: true
+        daemon_reload: true
+    - name: Verify backend health
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:{{ jobs_port }}/api/health'
+        return_content: true
+      register: backend
+      retries: 10
+      delay: 2
+      until: backend.status == 200
+    - name: Inspect existing HTTPS certificate
+      ansible.builtin.stat:
+        path: '/etc/letsencrypt/live/{{ jobs_domain }}/fullchain.pem'
+      register: certificate
+    - name: Configure isolated nginx virtual host
+      ansible.builtin.template:
+        src: jobs-nginx.conf.j2
+        dest: /etc/nginx/sites-available/africajobs.conf
+        mode: '0644'
+        backup: true
+      vars:
+        jobs_tls: '{{ certificate.stat.exists }}'
+    - name: Enable Africa Jobs virtual host
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/africajobs.conf
+        dest: /etc/nginx/sites-enabled/africajobs.conf
+        state: link
+    - name: Validate all nginx configuration before reload
+      ansible.builtin.command: nginx -t
+      changed_when: false
+    - name: Reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+    - name: Obtain or renew certificate through HTTP challenge
+      ansible.builtin.command:
+        argv:
+          - certbot
+          - certonly
+          - --webroot
+          - -w
+          - /var/www/africajobs-acme
+          - --non-interactive
+          - --agree-tos
+          - --email
+          - '{{ jobs_admin_email }}'
+          - --keep-until-expiring
+          - -d
+          - '{{ jobs_domain }}'
+      register: certbot
+      changed_when: "'not yet due for renewal' not in (certbot.stdout + certbot.stderr)"
+    - name: Activate HTTPS virtual host
+      ansible.builtin.template:
+        src: jobs-nginx.conf.j2
+        dest: /etc/nginx/sites-available/africajobs.conf
+        mode: '0644'
+      vars:
+        jobs_tls: true
+    - name: Validate final nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+    - name: Reload HTTPS configuration
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+    - name: Install certificate renewal reload hook
+      ansible.builtin.copy:
+        dest: /etc/letsencrypt/renewal-hooks/deploy/africajobs-nginx
+        mode: '0755'
+        content: |
+          #!/bin/sh
+          set -eu
+          /usr/sbin/nginx -t
+          /bin/systemctl reload nginx
+    - name: Enable certificate renewal timer
+      ansible.builtin.systemd:
+        name: certbot.timer
+        state: started
+        enabled: true
+    - name: Verify trusted public HTTPS application
+      ansible.builtin.uri:
+        url: 'https://{{ jobs_domain }}/api/health'
+        validate_certs: true
+        return_content: true
+      register: public_health
+      retries: 5
+      delay: 3
+      until: public_health.status == 200 and public_health.json.service == 'Africa Jobs'
+    - name: Write verified hosting status
+      ansible.builtin.copy:
+        dest: /var/lib/africajobs-deploy/hosting-status.json
+        mode: '0644'
+        content: "{{ {'domain': jobs_domain, 'url': 'https://' + jobs_domain, 'repository': jobs_repository, 'commit': source.after, 'service': 'africajobs', 'port': jobs_port, 'status': 'healthy', 'health_path': '/api/health'} | to_nice_json }}"
+    - name: Export status to an explicitly configured panel import directory
+      ansible.builtin.copy:
+        src: /var/lib/africajobs-deploy/hosting-status.json
+        remote_src: true
+        dest: '{{ jobs_panel_inventory_directory }}/africajobs.json'
+        mode: '0644'
+      when: jobs_panel_inventory_directory | length > 0
+    - name: Show deployment result
+      ansible.builtin.debug:
+        msg:
+          - 'Africa Jobs is available at https://{{ jobs_domain }}'
+          - 'Initial administrator credentials: /var/lib/africajobs-deploy/initial-admin.txt (root only).'
+          - 'Hosting status: /var/lib/africajobs-deploy/hosting-status.json'

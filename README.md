@@ -44,3 +44,29 @@ node --check static/app.js
 ```
 
 Integration tests exercise actual HTTP requests for the lifecycle, proposal rates, required tasks, duplicate approval prevention, provider permissions, CSRF rejection, and cross-tenant isolation. Browser visual QA and production load testing have not been performed.
+
+## Host jobs.africandroid.world on Olamidepanel
+
+On the hosting server (Debian 12), run:
+
+```sh
+git clone https://github.com/olamidebello/Africajobs.git /opt/africajobs-deployer
+cd /opt/africajobs-deployer
+sudo apt-get update
+sudo apt-get install -y ansible
+sudo ansible-playbook -i localhost, -c local deploy/host-olamidepanel.yml
+```
+
+Or from an Ansible controller with authorized SSH access:
+
+```sh
+ansible-playbook -i deploy/olamidepanel.ini deploy/host-olamidepanel.yml
+```
+
+Before running, create DNS `A` record `jobs.africandroid.world` pointing to the hosting server (inventory defaults to `181.214.149.146`; verify before use). Remove any stale AAAA record unless IPv6 is configured. TCP ports 80 and 443 must reach nginx. The script does not create Namecheap DNS records. Certbot reports challenge failures if DNS or inbound networking is not ready.
+
+The playbook pulls `main` to `/opt/africajobs-source`, preserves existing environment secrets and the database, starts the loopback service on 8098, adds a dedicated nginx virtual host, obtains/renews TLS, enables certificate renewal, and verifies trusted public HTTPS. It does not replace other hosted domains. Dirty application checkouts cause a failure instead of being overwritten.
+
+Initial admin email defaults to `dobcalldemo@gmail.com` and the password is generated on the server, stored root-only in `/var/lib/africajobs-deploy/initial-admin.txt`. Existing admin credentials are preserved. Override `jobs_admin_email`, `jobs_port`, or pin `jobs_revision` through Ansible variables as needed.
+
+Panel integration: a verified deployment descriptor is written to `/var/lib/africajobs-deploy/hosting-status.json`. Set `jobs_panel_inventory_directory` only to an existing, verified Olamidepanel JSON import directory to export it there. Automatic registration in the panel GUI is not claimed because its current inventory API/schema has not been inspected. The playbook has not been executed against the hosting server from this workspace.

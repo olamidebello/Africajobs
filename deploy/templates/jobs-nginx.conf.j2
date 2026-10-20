@@ -1,0 +1,31 @@
+server {
+    listen 80;
+    server_name {{ jobs_domain }};
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/africajobs-acme;
+    }
+    location / {
+{% if jobs_tls | bool %}
+        return 301 https://$host$request_uri;
+{% else %}
+        return 503;
+{% endif %}
+    }
+}
+{% if jobs_tls | bool %}
+server {
+    listen 443 ssl;
+    server_name {{ jobs_domain }};
+    ssl_certificate /etc/letsencrypt/live/{{ jobs_domain }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ jobs_domain }}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 8m;
+    location / {
+        proxy_pass http://127.0.0.1:{{ jobs_port }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 60s;
+    }
+}
+{% endif %}
