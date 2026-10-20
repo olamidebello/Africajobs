@@ -72,7 +72,7 @@ class Handler(BaseHTTPRequestHandler):
   try:
    self.cookie=None; path=self.path.split('?')[0]
    if not path.startswith('/api/'):
-    assets={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/brand/africa-jobs-logo.png':'brand/africa-jobs-logo.png','/brand/africa-jobs-icon.png':'brand/africa-jobs-icon.png','/manifest.webmanifest':'manifest.webmanifest','/terms':'terms.html','/privacy':'privacy.html','/copyright':'copyright.html'}
+    assets={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/brand/africa-jobs-logo.png':'brand/africa-jobs-logo.png','/brand/africa-jobs-icon.png':'brand/africa-jobs-icon.png','/manifest.webmanifest':'manifest.webmanifest','/download-app':'download-app.html','/terms':'terms.html','/privacy':'privacy.html','/copyright':'copyright.html'}
     if path not in assets: raise Error('Not found',404)
     p=ROOT/'static'/assets[path]
     return self.send(p.read_bytes(),mime={'html':'text/html; charset=utf-8','js':'text/javascript','css':'text/css','png':'image/png','webmanifest':'application/manifest+json'}[p.suffix[1:]])
