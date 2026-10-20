@@ -64,10 +64,8 @@
         path: /etc/africajobs.env
       register: environment
     - name: Create initial secure administrator password
-      ansible.builtin.command:
-        argv: [python3, -c, 'import secrets; print(secrets.token_urlsafe(32))']
-      register: generated_password
-      changed_when: false
+      ansible.builtin.set_fact:
+        jobs_initial_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=43, chars=['ascii_letters', 'digits']) }}"
       no_log: true
       when: not environment.stat.exists
     - name: Save initial credentials for the server administrator
@@ -78,7 +76,7 @@
         content: |
           URL=https://{{ jobs_domain }}
           Email={{ jobs_admin_email }}
-          Password={{ generated_password.stdout }}
+          Password={{ jobs_initial_password }}
       no_log: true
       when: not environment.stat.exists
     - name: Initialize environment without replacing existing secrets
@@ -92,7 +90,7 @@
           PORT={{ jobs_port }}
           AFRICAJOBS_SECURE_COOKIES=1
           AFRICAJOBS_ADMIN_EMAIL={{ jobs_admin_email }}
-          AFRICAJOBS_ADMIN_PASSWORD={{ generated_password.stdout }}
+          AFRICAJOBS_ADMIN_PASSWORD={{ jobs_initial_password }}
       no_log: true
       when: not environment.stat.exists
     - name: Keep runtime port aligned with proxy
