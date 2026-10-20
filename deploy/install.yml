@@ -1,0 +1,92 @@
+---
+- name: Install Africa Jobs from a checked-out repository
+  hosts: all
+  become: true
+  vars:
+    africajobs_source: "{{ playbook_dir }}/.."
+    africajobs_port: 8098
+  tasks:
+    - name: Install runtime
+      ansible.builtin.apt:
+        name: python3
+        state: present
+        update_cache: true
+    - name: Create service identity
+      ansible.builtin.user:
+        name: africajobs
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+    - name: Create application directory
+      ansible.builtin.file:
+        path: /opt/africajobs/static
+        state: directory
+        mode: '0755'
+    - name: Create persistent database directory
+      ansible.builtin.file:
+        path: /var/lib/africajobs
+        state: directory
+        owner: africajobs
+        group: africajobs
+        mode: '0700'
+    - name: Copy server
+      ansible.builtin.copy:
+        src: "{{ africajobs_source }}/app.py"
+        dest: /opt/africajobs/app.py
+        mode: '0644'
+      notify: Restart Africa Jobs
+    - name: Copy frontend
+      ansible.builtin.copy:
+        src: "{{ africajobs_source }}/static/"
+        dest: /opt/africajobs/static/
+        mode: '0644'
+      notify: Restart Africa Jobs
+    - name: Require initial administrator credentials
+      ansible.builtin.assert:
+        that:
+          - africajobs_admin_email is defined
+          - africajobs_admin_password is defined
+          - africajobs_admin_password | length >= 14
+        fail_msg: Supply admin credentials through Ansible Vault, never commit them.
+      no_log: true
+    - name: Write restricted environment
+      ansible.builtin.copy:
+        dest: /etc/africajobs.env
+        mode: '0600'
+        content: |
+          AFRICAJOBS_DB=/var/lib/africajobs/jobs.db
+          HOST=127.0.0.1
+          PORT={{ africajobs_port }}
+          AFRICAJOBS_SECURE_COOKIES=1
+          AFRICAJOBS_ADMIN_EMAIL={{ africajobs_admin_email }}
+          AFRICAJOBS_ADMIN_PASSWORD={{ africajobs_admin_password }}
+      no_log: true
+      notify: Restart Africa Jobs
+    - name: Install service
+      ansible.builtin.copy:
+        src: africajobs.service
+        dest: /etc/systemd/system/africajobs.service
+        mode: '0644'
+      notify: Restart Africa Jobs
+    - name: Activate service
+      ansible.builtin.systemd:
+        name: africajobs
+        enabled: true
+        state: started
+        daemon_reload: true
+    - name: Apply updated files before health check
+      ansible.builtin.meta: flush_handlers
+    - name: Verify service
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ africajobs_port }}/api/health"
+        status_code: 200
+      register: health
+      retries: 10
+      delay: 2
+      until: health.status == 200
+  handlers:
+    - name: Restart Africa Jobs
+      ansible.builtin.systemd:
+        name: africajobs
+        state: restarted
+        daemon_reload: true

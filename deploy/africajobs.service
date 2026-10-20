@@ -1,0 +1,17 @@
+[Unit]
+Description=Africa Jobs marketplace
+After=network.target
+[Service]
+User=africajobs
+Group=africajobs
+WorkingDirectory=/opt/africajobs
+EnvironmentFile=/etc/africajobs.env
+ExecStart=/usr/bin/python3 /opt/africajobs/app.py
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/africajobs
+[Install]
+WantedBy=multi-user.target
