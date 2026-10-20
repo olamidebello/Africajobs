@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY,tenant TEXT NOT NULL,modu
 CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,tenant TEXT,job TEXT,user TEXT,body TEXT,created REAL);
 CREATE TABLE IF NOT EXISTS ledger(id TEXT PRIMARY KEY,tenant TEXT,user TEXT,job TEXT,amount INTEGER,currency TEXT,kind TEXT,created REAL,UNIQUE(job,kind));
 CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY,tenant TEXT,job TEXT,user TEXT,name TEXT,mime TEXT,body BLOB,created REAL);
+CREATE TABLE IF NOT EXISTS legal_acceptances(user TEXT REFERENCES users(id),terms_version TEXT,privacy_version TEXT,accepted_at REAL);
 CREATE TABLE IF NOT EXISTS login_limits(key TEXT PRIMARY KEY,attempts INTEGER,until REAL);
 ''')
   email=os.environ.get('AFRICAJOBS_ADMIN_EMAIL'); pw=os.environ.get('AFRICAJOBS_ADMIN_PASSWORD')
@@ -71,7 +72,7 @@ class Handler(BaseHTTPRequestHandler):
   try:
    self.cookie=None; path=self.path.split('?')[0]
    if not path.startswith('/api/'):
-    assets={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/brand/africa-jobs-logo.png':'brand/africa-jobs-logo.png','/brand/africa-jobs-icon.png':'brand/africa-jobs-icon.png','/manifest.webmanifest':'manifest.webmanifest'}
+    assets={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/brand/africa-jobs-logo.png':'brand/africa-jobs-logo.png','/brand/africa-jobs-icon.png':'brand/africa-jobs-icon.png','/manifest.webmanifest':'manifest.webmanifest','/terms':'terms.html','/privacy':'privacy.html','/copyright':'copyright.html'}
     if path not in assets: raise Error('Not found',404)
     p=ROOT/'static'/assets[path]
     return self.send(p.read_bytes(),mime={'html':'text/html; charset=utf-8','js':'text/javascript','css':'text/css','png':'image/png','webmanifest':'application/manifest+json'}[p.suffix[1:]])
@@ -101,13 +102,15 @@ class Handler(BaseHTTPRequestHandler):
   c=self.c; d=self.data; method=self.command
   if p=='/api/health': return {'status':'ok','service':'Africa Jobs'}
   if p=='/api/register' and method=='POST':
+   if d.get('accept_terms') is not True or d.get('acknowledge_privacy') is not True or d.get('legal_version') != '2026-10-20': raise Error('Accept the current Terms and acknowledge the Privacy Policy to register')
    email=d['email'].strip().lower(); pw=d['password']; name=d['name'].strip(); org=d['company'].strip()
    if '@' not in email or len(pw)<12 or not name or not org: raise Error('Name, company, valid email and a 12-character password are required')
    uid,tid=secrets.token_hex(12),secrets.token_hex(12)
    c.execute('INSERT INTO users(id,email,password,name) VALUES(?,?,?,?)',(uid,email,password(pw),name))
    c.execute('INSERT INTO tenants(id,name,currency) VALUES(?,?,?)',(tid,org,d.get('currency','NGN') if d.get('currency','NGN') in ['NGN','USD','KES','GHS','ZAR','EUR','GBP'] else 'NGN'))
    role='provider' if d.get('account')=='provider' else 'buyer_admin'
-   c.execute('INSERT INTO memberships VALUES(?,?,?)',(tid,uid,role)); return {'registered':True}
+   c.execute('INSERT INTO memberships VALUES(?,?,?)',(tid,uid,role))
+   c.execute('INSERT INTO legal_acceptances VALUES(?,?,?,?)',(uid,'2026-10-20','2026-10-20',time.time())); return {'registered':True}
   if p=='/api/login' and method=='POST':
    key=self.client_address[0]+':'+d.get('email','').lower()
    limit=c.execute('SELECT * FROM login_limits WHERE key=?',(key,)).fetchone()

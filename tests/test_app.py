@@ -18,7 +18,7 @@ class Marketplace(unittest.TestCase):
    with urllib.request.urlopen(req) as r:return r.status,json.load(r),r.headers
   except urllib.error.HTTPError as e:return e.code,json.load(e),e.headers
  def register(self,email,account='buyer'):
-  self.assertEqual(self.call('register','POST',{'name':email,'email':email,'password':'safe-password-123','company':email,'account':account})[0],200)
+  self.assertEqual(self.call('register','POST',{'name':email,'email':email,'password':'safe-password-123','company':email,'account':account,'accept_terms':True,'acknowledge_privacy':True,'legal_version':'2026-10-20'})[0],200)
   _,r,h=self.call('login','POST',{'email':email,'password':'safe-password-123'})
   a={'cookie':h['Set-Cookie'].split(';')[0],'csrf':r['csrf'],'tenant':''}
   _,m,_=self.call('me',auth=a);a['tenant']=m['tenant'];return a,m
@@ -45,6 +45,15 @@ class Marketplace(unittest.TestCase):
   self.assertEqual(self.call('jobs/'+j['id'],auth=stranger)[0],404)
   self.assertEqual(self.call('records/plans','POST',{'name':'Fraud'},tech)[0],403)
   self.assertEqual(self.call('jobs','POST',{'title':'CSRF','amount':1},{**buyer,'csrf':'bad'})[0],403)
+ def test_legal_pages_and_acceptance(self):
+  for path in ['/terms','/privacy','/copyright']:
+   with urllib.request.urlopen(self.url+path) as r:
+    self.assertEqual(r.status,200); self.assertIn(b'2026',r.read())
+  self.assertEqual(self.call('register','POST',{'name':'No consent','email':'no@example.com','password':'safe-password-123','company':'Test'})[0],400)
+  a,m=self.register('legal@example.com')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM legal_acceptances WHERE user=?',(m['user']['id'],)).fetchone()
+   self.assertEqual(row['terms_version'],'2026-10-20')
  def test_records_private(self):
   a,_=self.register('first@example.com','provider');b,_=self.register('second@example.com','provider')
   self.call('records/credentials','POST',{'name':'Network certificate'},a)
