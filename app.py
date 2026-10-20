@@ -71,10 +71,10 @@ class Handler(BaseHTTPRequestHandler):
   try:
    self.cookie=None; path=self.path.split('?')[0]
    if not path.startswith('/api/'):
-    assets={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
+    assets={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/brand/africa-jobs-logo.png':'brand/africa-jobs-logo.png','/brand/africa-jobs-icon.png':'brand/africa-jobs-icon.png','/manifest.webmanifest':'manifest.webmanifest'}
     if path not in assets: raise Error('Not found',404)
     p=ROOT/'static'/assets[path]
-    return self.send(p.read_bytes(),mime={'html':'text/html; charset=utf-8','js':'text/javascript','css':'text/css'}[p.suffix[1:]])
+    return self.send(p.read_bytes(),mime={'html':'text/html; charset=utf-8','js':'text/javascript','css':'text/css','png':'image/png','webmanifest':'application/manifest+json'}[p.suffix[1:]])
    length=int(self.headers.get('Content-Length','0'))
    if length>8_000_000: raise Error('Maximum request size is 8 MB',413)
    self.data=json.loads(self.rfile.read(length) or b'{}')

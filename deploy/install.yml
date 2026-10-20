@@ -35,6 +35,11 @@
         dest: /opt/africajobs/app.py
         mode: '0644'
       notify: Restart Africa Jobs
+    - name: Create brand directory
+      ansible.builtin.file:
+        path: /opt/africajobs/static/brand
+        state: directory
+        mode: '0755'
     - name: Copy frontend
       ansible.builtin.copy:
         src: "{{ africajobs_source }}/static/"
