@@ -62,12 +62,12 @@
     - name: Inspect persistent service environment
       ansible.builtin.stat:
         path: /etc/africajobs.env
-      register: environment
+      register: jobs_environment_stat
     - name: Create initial secure administrator password
       ansible.builtin.set_fact:
         jobs_initial_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=43, chars=['ascii_letters', 'digits']) }}"
       no_log: true
-      when: not environment.stat.exists
+      when: not jobs_environment_stat.stat.exists
     - name: Save initial credentials for the server administrator
       ansible.builtin.copy:
         dest: /var/lib/africajobs-deploy/initial-admin.txt
@@ -78,7 +78,7 @@
           Email={{ jobs_admin_email }}
           Password={{ jobs_initial_password }}
       no_log: true
-      when: not environment.stat.exists
+      when: not jobs_environment_stat.stat.exists
     - name: Initialize environment without replacing existing secrets
       ansible.builtin.copy:
         dest: /etc/africajobs.env
@@ -92,7 +92,7 @@
           AFRICAJOBS_ADMIN_EMAIL={{ jobs_admin_email }}
           AFRICAJOBS_ADMIN_PASSWORD={{ jobs_initial_password }}
       no_log: true
-      when: not environment.stat.exists
+      when: not jobs_environment_stat.stat.exists
     - name: Keep runtime port aligned with proxy
       ansible.builtin.lineinfile:
         path: /etc/africajobs.env
